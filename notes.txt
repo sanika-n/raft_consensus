@@ -1,0 +1,55 @@
+-The actual paper (2014) https://raft.github.io/raft.pdf
+-The site https://raft.github.io/
+
+Problems we are trying to solve and some other things to keep in mind:
+- Nodes can die
+- Nodes can come back around
+- Nodes can miss a message
+- Messages could be reordered
+- There can be a delay in the network and a message might reach a particular node a bit later than the others.
+- There can be multiple clients.
+- Multiple clients may issue concurrent requests.
+- If a node comes back to life then it must be made up to date with the other nodes.
+- At any point, the nodes may have different uncommitted suffixes, but the committed part of the log must be consistent, and once an entry is committed it will not disappear.
+- So the committed history must be consistent.
+- If a node dies, it can no longer transfer any of its data through the network anymore.
+- There is no central observer, so you can't execute commands like: " Go to each node and check which one is the most up to date." Also even if a node is alive, it may so be that at an instance of time, it is able to be reached by live nodes x and y but not by the live node z. So this node according to z will be considered dead. So making a particular node the central observer is also not an option.
+
+
+Proposition: 
+Why not have the client relay the message to each and every node?
+Problems: 
+- what if the client fails midway? i.e. it sends to the first 3 nodes and the stops? (Note, if the client fails to serve it to all nodes then it is a client problem not a distribution problem)
+- What if a particular node misses the message?
+- What if there are multiple clients and they are not reaching out to all nodes in the same order? The log history won't be consistent anymore.
+
+Edit 1:
+- make the clients reach out in the same order and make a node ask its predecessor if to check if its up to date and make it copy if it isnt.
+
+Edit 2:
+- Then somehow all nodes much be connected to each other and they must always check on each other.
+Problems:
+-insanely complicated and the idea is not concrete.
+-but note that with each edit we are realizing that the nodes must talk to each other and we can't just rely on the client reaching out to each of the nodes every single time.
+
+
+
+
+
+
+- Nodes can send an acknowledgment message when it has successfully added the update to its log. 
+- What if the ack message gets lost? In such cases there is no certain way of knowing if the node died, the message was missed or if the ack message wasn't received, so the message just must be sent again. (Attach IDs to messages so that duplicate messages are ignored in case of failed acks).
+- The leader is reaching out to the other nodes asynchronously so there is an order in which nodes are approached, but it isn't necessary that the time the messages are received will also be in that order.
+- The client will also get ack messages.
+- when leader fails, the client keeps resending the message until acknowledged. 
+
+-instead of keeping up with many nodes, ensure one node is in perfect condition and propagate that. Find a way to keep track if it's alive.
+- why not just send the whole log each time from the current lead node, then any restored nodes wont have problem. its not easy to send one big message like that every single time.
+-sometimes if a node is restored after a long time, instead of copying all the updates so far, it copies the current state of all items in the database(called a snap shot). So for a bank a snapshot will basically be the current bank balance of all the users. So their transaction history will not be stored by the revived node.
+
+-elections also have terms/versions, so in case a manifesto goes stale due to network issue, it will be ignored in case other manifestos turn up. So elections can fail.
+-so it is not necessary that everytime the most up to date ndoe is chosen, cuz sometimes the most up to date person's manifesto might fail to reach some live nodes in which case that person might not get elected.
+-an election can only be won if the person with the most votes gets more than half of the number of nodes. ie For a candidate to become leader, it must receive votes from a majority of the entire cluster, not just a majority of the votes that were cast.
+
+-version 1 of prototype: make the leader send the whole log and the follower nodes will just copy paste it.
+-version 2 of prototype: followers mention the number of entries in their ack message and the leader just sends the messages after that.
