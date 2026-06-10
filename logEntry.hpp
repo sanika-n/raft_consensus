@@ -5,7 +5,6 @@ using namespace std;
 
 struct LogEntry{
     int term;
-    int commandId;
     string command;
 
 };

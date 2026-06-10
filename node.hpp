@@ -30,12 +30,9 @@ public:
     void stop();
     void enqueue(std::unique_ptr<Message> msg);
     void setCluster(const std::vector<Node*>& nodes);
-    bool submitCommand(int commandId, const std::string& command); //the client will call this indirectly 
-    bool submitCommandAndCrashBeforeAck(int commandId, const std::string& command, int followersToReach);
-    bool hasAppliedCommand(int commandId);
+    void submitCommand(const std::string& command); //the client will call this indirectly 
 
     int getId() const;
-    bool isRunning() const;
 
 private:
 
@@ -91,7 +88,6 @@ private:
     void sendVoteRequests();
 
     void sendHeartbeats();
-    int replicateLogToFollowers(int maxFollowers);
 
     void replicateLog(int followerId);
 
@@ -99,8 +95,6 @@ private:
     void handleVoteResponse(const VOTE_RESPONSE& msg);
     void handleLogUpdate(const LOG_UPDATE& msg);
     void handleLogUpdateResponse(const LOG_UPDATE_RESPONSE& msg);
-
-    bool hasCommand(int commandId) const;
 
     int lastLogIndex() const;
     int lastLogTerm() const;

@@ -21,27 +21,16 @@ Node::~Node() { stop(); }
 
 
 int Node::getId() const { return id; }
-bool Node::isRunning() const { return running; }
 void Node::setCluster(const std::vector<Node*>& nodes) { cluster = nodes; } //set externally in main
 
 void Node::enqueue(std::unique_ptr<Message> msg) //using a ptr to prevent object slicing
 {
-    if (!running) return;
-
     std::lock_guard<std::mutex> lk(inboxMutex);
     inbox.push(std::move(msg)); //moving ownership cuz unique ptr
 }
 
 void Node::start() // nodes are started in main
 {
-    if (running) return;
-
-    {
-        std::lock_guard<std::mutex> lk(stateMutex);
-        lastHeartbeatReceived = std::chrono::steady_clock::now();
-        electionTimeout = randomElectionTimeout();
-    }
-
     running = true;
     worker = std::thread(&Node::run, this);
 }
@@ -52,80 +41,18 @@ void Node::stop()
     if (worker.joinable()) worker.join();
 }
 
-bool Node::submitCommand(int commandId, const std::string& command)
+void Node::submitCommand(const std::string& command)
 {
     std::lock_guard<std::mutex> lk(stateMutex);
-    if (!running)
-    {
-        std::cout << "[Node " << id << "] Down, cannot accept command: " << command << "\n";
-        return false;
-    }
-
     if (state != NodeState::LEADER)
     {
         std::cout << "[Node " << id << "] Not leader, ignoring command: " << command << "\n";
-        return false;
+        return;
     }
-
-    if (hasCommand(commandId))
-    {
-        std::cout << "[Node " << id << "] Leader already has command #" << commandId << ": " << command << "\n";
-    }
-    else
-    {
-        log.push_back({currentTerm, commandId, command}); 
-        /*Here the client thread(main thread) is directly touching the log and checking the state of the node, but it is safe
-        cuz we are using the same stateMutex used within Node::run() */
-        std::cout << "[Node " << id << "] Leader appended command #" << commandId << ": " << command << " at index " << (int)log.size()-1 << "\n";
-    }
-
-    sendHeartbeats();
-    lastHeartbeatSent = std::chrono::steady_clock::now();
-    return true;
-}
-
-bool Node::submitCommandAndCrashBeforeAck(int commandId, const std::string& command, int followersToReach)
-{
-    bool shouldJoin = false;
-    {
-        std::lock_guard<std::mutex> lk(stateMutex);
-        if (!running || state != NodeState::LEADER)
-            return false;
-
-        if (hasCommand(commandId))
-        {
-            std::cout << "[Node " << id << "] Leader already has command #" << commandId << ": " << command << "\n";
-        }
-        else
-        {
-            log.push_back({currentTerm, commandId, command});
-            std::cout << "[Node " << id << "] Leader appended command #" << commandId << ": " << command << " at index " << (int)log.size()-1 << "\n";
-        }
-
-        int sent = replicateLogToFollowers(followersToReach);
-        std::cout << "[Node " << id << "] Simulated crash after forwarding command #"
-                  << commandId << " to " << sent << " follower(s), before client ack\n";
-
-        state = NodeState::FOLLOWER;
-        running = false;
-        shouldJoin = true;
-    }
-
-    if (shouldJoin && worker.joinable())
-        worker.join();
-
-    return true;
-}
-
-bool Node::hasAppliedCommand(int commandId)
-{
-    std::lock_guard<std::mutex> lk(stateMutex);
-    for (int i = 0; i <= lastApplied && i < (int)log.size(); ++i)
-    {
-        if (log[i].commandId == commandId)
-            return true;
-    }
-    return false;
+    log.push_back({currentTerm, command}); 
+    /*Here the client thread(main thread) is directly touching the log and checking the state of the node, but it is safe
+    cuz we are using the same stateMutex used within Node::run() */
+    std::cout << "[Node " << id << "] Leader appended command: " << command << " at index " << (int)log.size()-1 << "\n";
 }
 
 
@@ -225,16 +152,6 @@ bool Node::isLogUpToDate(int candidateLastIndex, int candidateLastTerm) const
     return candidateLastIndex >= myIndex;
 }
 
-bool Node::hasCommand(int commandId) const
-{
-    for (const auto& entry : log)
-    {
-        if (entry.commandId == commandId)
-            return true;
-    }
-    return false;
-}
-
 // The following functions must only be called while the stateMutex is held
 
 void Node::becomeFollower(int term)
@@ -300,25 +217,11 @@ void Node::sendVoteRequests()
 
 void Node::sendHeartbeats()
 {
-    replicateLogToFollowers(-1);
-}
-
-int Node::replicateLogToFollowers(int maxFollowers)
-{
-    int sent = 0;
     for (auto* peer : cluster)
     {
         if (peer->getId() == id) continue;
-        if (!peer->running) continue;
-
         replicateLog(peer->getId());
-        ++sent;
-
-        if (maxFollowers >= 0 && sent >= maxFollowers)
-            break;
     }
-
-    return sent;
 }
 
 void Node::replicateLog(int followerId)
@@ -336,7 +239,6 @@ void Node::replicateLog(int followerId)
     for (auto* peer : cluster){
         if (peer->getId() == followerId){
             peer->enqueue(std::move(msg));
-            break;
         }
     }
 }
@@ -466,3 +368,5 @@ void Node::handleLogUpdateResponse(const LOG_UPDATE_RESPONSE& msg)
         }
     }
 }
+
+
